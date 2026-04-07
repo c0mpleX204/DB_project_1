@@ -1,0 +1,70 @@
+erDiagram
+    REGION ||--o{ CITY : contains
+    CITY ||--o{ AIRPORT : has
+    REGION ||--o{ AIRLINE : has
+    AIRLINE ||--o{ FLIGHT : operates
+    AIRPORT ||--o{ FLIGHT : departure
+    AIRPORT ||--o{ FLIGHT : arrival
+    FLIGHT ||--o{ TICKET_INVENTORY : schedules
+    PASSENGER ||--o{ TICKET_ORDER : places
+    TICKET_INVENTORY ||--o{ TICKET_ORDER : booked_as
+
+    REGION {
+        varchar region_code PK
+        text region_name UK
+    }
+    CITY {
+        bigint city_id PK
+        text city_name
+        varchar region_code FK
+    }
+    AIRPORT {
+        bigint airport_id PK
+        bigint source_airport_id UK
+        text airport_name
+        char iata_code UK
+        bigint city_id FK
+    }
+    AIRLINE {
+        bigint airline_id PK
+        bigint source_airline_id UK
+        varchar airline_code UK
+        text airline_name
+        varchar region_code FK
+    }
+    PASSENGER {
+        bigint passenger_id PK
+        bigint source_passenger_id UK
+        text passenger_name
+        int age
+        varchar gender
+        varchar mobile_number UK
+    }
+    FLIGHT {
+        bigint flight_id PK
+        varchar flight_number UK
+        bigint airline_id FK
+        bigint source_airport_id FK
+        bigint destination_airport_id FK
+        time departure_time_local
+        time arrival_time_local
+        smallint arrival_day_offset
+    }
+    TICKET_INVENTORY {
+        bigint ticket_id PK
+        bigint flight_id FK
+        date flight_date
+        numeric business_price
+        int business_remain
+        numeric economy_price
+        int economy_remain
+    }
+    TICKET_ORDER {
+        bigint order_id PK
+        bigint passenger_id FK
+        bigint ticket_id FK
+        varchar cabin_class
+        numeric unit_price
+        timestamptz booked_at
+        varchar status
+    }

@@ -334,6 +334,37 @@ def list_flights_between_iata(conn, source_code: str, destination_code: str):
         print(f"{r[0]} | {r[1]} ({r[2]}) -> {r[3]} ({r[4]})")
 
 
+def list_tickets_by_date_city(conn, date_, departure_city: str, arrival_city: str):
+    search_tickets(
+        conn,
+        departure_city=departure_city,
+        arrival_city=arrival_city,
+        date_=date_,
+        airline=None,
+        departure_time=None,
+        arrival_time=None,
+    )
+
+
+def list_tickets_by_time_window(
+    conn,
+    date_,
+    departure_city: str,
+    arrival_city: str,
+    departure_time_after,
+    arrival_time_before,
+):
+    search_tickets(
+        conn,
+        departure_city=departure_city,
+        arrival_city=arrival_city,
+        date_=date_,
+        airline=None,
+        departure_time=departure_time_after,
+        arrival_time=arrival_time_before,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="CS307 DB Project CLI")
     parser.add_argument("--host", default="localhost")
@@ -381,6 +412,18 @@ def main():
     p.add_argument("--source", required=True)
     p.add_argument("--destination", required=True)
 
+    p = sub.add_parser("tickets-by-date-city", help="Task 3.2 query #5")
+    p.add_argument("--date", required=True)
+    p.add_argument("--departure-city", required=True)
+    p.add_argument("--arrival-city", required=True)
+
+    p = sub.add_parser("tickets-by-time-window", help="Task 3.2 query #6")
+    p.add_argument("--date", required=True)
+    p.add_argument("--departure-city", required=True)
+    p.add_argument("--arrival-city", required=True)
+    p.add_argument("--departure-time-after", required=True)
+    p.add_argument("--arrival-time-before", required=True)
+
     args = parser.parse_args()
 
     conn = get_conn(args)
@@ -411,6 +454,22 @@ def main():
             list_airlines_by_region(conn, args.region_code.upper())
         elif args.cmd == "flights-by-iata":
             list_flights_between_iata(conn, args.source, args.destination)
+        elif args.cmd == "tickets-by-date-city":
+            list_tickets_by_date_city(
+                conn,
+                parse_date(args.date),
+                args.departure_city,
+                args.arrival_city,
+            )
+        elif args.cmd == "tickets-by-time-window":
+            list_tickets_by_time_window(
+                conn,
+                parse_date(args.date),
+                args.departure_city,
+                args.arrival_city,
+                parse_time(args.departure_time_after),
+                parse_time(args.arrival_time_before),
+            )
     finally:
         conn.close()
 
