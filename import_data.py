@@ -81,7 +81,9 @@ def build_region_codes(region_rows, airport_rows, airline_rows, ticket_rows):
         code = base
         i = 1
         while code in used_codes:
-            code = f"{base[0]}{i % 10}"
+            suffix = str(i)
+            prefix = base[: max(1, 8 - len(suffix))]
+            code = f"{prefix}{suffix}"
             i += 1
         code_map[name] = code
         used_codes.add(code)

@@ -263,7 +263,7 @@ def list_cities_by_region(conn, region_code: str):
             """
             SELECT DISTINCT c.city_name
             FROM city c
-            WHERE c.region_code = %s
+            WHERE UPPER(c.region_code) = UPPER(%s)
             ORDER BY c.city_name
             """,
             (region_code,),
@@ -296,7 +296,7 @@ def list_airlines_by_region(conn, region_code: str):
             """
             SELECT airline_code, airline_name
             FROM airline
-            WHERE region_code = %s
+            WHERE UPPER(region_code) = UPPER(%s)
             ORDER BY airline_code
             """,
             (region_code,),

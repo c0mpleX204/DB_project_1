@@ -1,5 +1,5 @@
 -- Task 3.2 #1: Given a region code, list all cities.
-SELECT DISTINCT c.city_name
+SELECT c.city_name
 FROM city c
 WHERE c.region_code = :region_code
 ORDER BY c.city_name;
