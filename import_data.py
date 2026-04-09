@@ -389,21 +389,26 @@ def upsert_flights_and_tickets(conn, ticket_rows, airport_map, airline_name_map)
         cur.execute("SELECT flight_id, flight_number FROM flight")
         flight_id_map = {num: fid for fid, num in cur.fetchall()}
 
-    ticket_values = []
+    # Build ticket values, deduplicating by (flight_id, flight_date).
+    # Some flight numbers appear with multiple routes in the source data; they all
+    # map to the same flight_id after deduplication, so keep only the last entry per
+    # (flight_id, date) to avoid a CardinalityViolation in the batch upsert.
+    seen_ticket_keys: dict = {}
     for r in ticket_rows:
         number = r["number"].strip()
         if number not in flight_id_map:
             continue
-        ticket_values.append(
-            (
-                flight_id_map[number],
-                parse_date(r["date"]),
-                Decimal(r["business_price"]),
-                int(r["business_remain"]),
-                Decimal(r["economy_price"]),
-                int(r["economy_remain"]),
-            )
+        flight_id = flight_id_map[number]
+        flight_date = parse_date(r["date"])
+        seen_ticket_keys[(flight_id, flight_date)] = (
+            flight_id,
+            flight_date,
+            Decimal(r["business_price"]),
+            int(r["business_remain"]),
+            Decimal(r["economy_price"]),
+            int(r["economy_remain"]),
         )
+    ticket_values = list(seen_ticket_keys.values())
 
     with conn.cursor() as cur:
         execute_values(
