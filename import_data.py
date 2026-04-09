@@ -154,13 +154,16 @@ def fetch_city_map(conn):
 def upsert_airports(conn, airport_rows, ticket_rows, city_map, region_code_map):
     rows = []
     for r in airport_rows:
+        iata = r["iata_code"].strip().upper()
+        if len(iata) != 3:
+            continue
         region_name = normalize_region(r["region"])
         city_id = city_map[(r["city"].strip(), region_code_map[region_name])]
         rows.append(
             (
                 int(r["id"]),
                 r["name"].strip(),
-                r["iata_code"].strip().upper(),
+                iata,
                 city_id,
                 float(r["latitude"]),
                 float(r["longitude"]),
