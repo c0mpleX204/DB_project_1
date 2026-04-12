@@ -21,14 +21,30 @@ REGION_ALIAS = {
 }
 
 
+def clean_text(value: str) -> str:
+    value = (value or "").strip()
+    if value.lower() == "null":
+        return ""
+    return value
+
+
 def normalize_region(name: str) -> str:
-    name = (name or "").strip()
+    name = clean_text(name)
     return REGION_ALIAS.get(name, name)
 
 
 def clean_code(code: str) -> str:
-    code = (code or "").strip().upper()
+    code = clean_text(code).upper()
     return code
+
+
+def clean_optional_text(value: str):
+    value = clean_text(value)
+    return value or None
+
+
+def is_valid_iata_code(code: str) -> bool:
+    return len(clean_code(code)) == 3
 
 
 def parse_date(value: str) -> dt.date:
@@ -117,8 +133,10 @@ def upsert_cities(conn, airport_rows, ticket_rows, region_code_map):
     city_keys = set()
 
     for row in airport_rows:
+        if not is_valid_iata_code(row["iata_code"]):
+            continue
         region_name = normalize_region(row["region"])
-        city = row["city"].strip()
+        city = clean_text(row["city"])
         if city and region_name:
             city_keys.add((city, region_code_map[region_name]))
 
@@ -153,21 +171,27 @@ def fetch_city_map(conn):
 
 def upsert_airports(conn, airport_rows, ticket_rows, city_map, region_code_map):
     rows = []
+    skipped_invalid_iata = 0
     for r in airport_rows:
+        iata_code = clean_code(r["iata_code"])
+        if not is_valid_iata_code(iata_code):
+            skipped_invalid_iata += 1
+            continue
         region_name = normalize_region(r["region"])
-        city_id = city_map[(r["city"].strip(), region_code_map[region_name])]
+        city = clean_text(r["city"])
+        city_id = city_map[(city, region_code_map[region_name])]
         rows.append(
             (
                 int(r["id"]),
-                r["name"].strip(),
-                r["iata_code"].strip().upper(),
+                clean_text(r["name"]),
+                iata_code,
                 city_id,
                 float(r["latitude"]),
                 float(r["longitude"]),
                 int(r["altitude"]),
                 int(r["timezone_offset"]),
-                r["timezone_dst"].strip(),
-                r["timezone_region"].strip(),
+                clean_optional_text(r["timezone_dst"]),
+                clean_optional_text(r["timezone_region"]),
             )
         )
 
@@ -242,6 +266,8 @@ def upsert_airports(conn, airport_rows, ticket_rows, city_map, region_code_map):
                 """,
                 missing_rows,
             )
+    if skipped_invalid_iata:
+        print(f"Skipped {skipped_invalid_iata} airport row(s) with invalid IATA code")
     conn.commit()
 
 
@@ -317,8 +343,16 @@ def upsert_passengers(conn, passenger_rows):
 
 
 def upsert_flights_and_tickets(conn, ticket_rows, airport_map, airline_name_map):
-    per_flight = {}
     capacity = defaultdict(lambda: {"biz": 0, "eco": 0})
+    signature_to_flight_number = {}
+    flight_number_usage = defaultdict(int)
+
+    def make_flight_number(base_number: str, occurrence_index: int) -> str:
+        base_number = clean_text(base_number)
+        if occurrence_index <= 0:
+            return base_number[:16]
+        suffix = f"-{occurrence_index + 1}"
+        return f"{base_number[: max(0, 16 - len(suffix))]}{suffix}"
 
     for r in ticket_rows:
         number = r["number"].strip()
@@ -329,7 +363,7 @@ def upsert_flights_and_tickets(conn, ticket_rows, airport_map, airline_name_map)
         if not airline_id:
             continue
 
-        flight_key = (
+        flight_signature = (
             number,
             airline_id,
             airport_map[r["source_code"].strip().upper()],
@@ -339,23 +373,28 @@ def upsert_flights_and_tickets(conn, ticket_rows, airport_map, airline_name_map)
             arr_offset,
         )
 
-        per_flight[number] = flight_key
-        capacity[number]["biz"] = max(capacity[number]["biz"], int(r["business_remain"]))
-        capacity[number]["eco"] = max(capacity[number]["eco"], int(r["economy_remain"]))
+        flight_number = signature_to_flight_number.get(flight_signature)
+        if flight_number is None:
+            flight_number = make_flight_number(number, flight_number_usage[number])
+            signature_to_flight_number[flight_signature] = flight_number
+            flight_number_usage[number] += 1
+
+        capacity[flight_number]["biz"] = max(capacity[flight_number]["biz"], int(r["business_remain"]))
+        capacity[flight_number]["eco"] = max(capacity[flight_number]["eco"], int(r["economy_remain"]))
 
     flight_rows = [
         (
-            fk[0],
-            fk[1],
-            fk[2],
-            fk[3],
-            fk[4],
-            fk[5],
-            fk[6],
-            max(capacity[fk[0]]["biz"], 1),
-            max(capacity[fk[0]]["eco"], 1),
+            flight_number,
+            flight_signature[1],
+            flight_signature[2],
+            flight_signature[3],
+            flight_signature[4],
+            flight_signature[5],
+            flight_signature[6],
+            max(capacity[flight_number]["biz"], 1),
+            max(capacity[flight_number]["eco"], 1),
         )
-        for fk in per_flight.values()
+        for flight_signature, flight_number in signature_to_flight_number.items()
     ]
 
     with conn.cursor() as cur:
@@ -389,11 +428,26 @@ def upsert_flights_and_tickets(conn, ticket_rows, airport_map, airline_name_map)
     ticket_values = []
     for r in ticket_rows:
         number = r["number"].strip()
-        if number not in flight_id_map:
+        airline_id = airline_name_map.get(r["airline_name"].strip())
+        if not airline_id:
+            continue
+
+        flight_signature = (
+            number,
+            airline_id,
+            airport_map[r["source_code"].strip().upper()],
+            airport_map[r["destination_code"].strip().upper()],
+            parse_time_with_offset(r["departure_time"])[0],
+            parse_time_with_offset(r["arrival_time"])[0],
+            parse_time_with_offset(r["arrival_time"])[1],
+        )
+
+        flight_number = signature_to_flight_number.get(flight_signature)
+        if not flight_number or flight_number not in flight_id_map:
             continue
         ticket_values.append(
             (
-                flight_id_map[number],
+                flight_id_map[flight_number],
                 parse_date(r["date"]),
                 Decimal(r["business_price"]),
                 int(r["business_remain"]),

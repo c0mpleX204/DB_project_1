@@ -1,0 +1,58 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>票务系统 - Dashboard</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-shape"></div>
+    <main class="page">
+      <header class="hero">
+        <h1>机票票务与管理系统</h1>
+        <p>多页面前端（Dashboard / Flights / Inventory / Orders）</p>
+        <nav class="top-nav">
+          <a class="nav-link active" href="./index.html">Dashboard</a>
+          <a class="nav-link" href="./flights.html">Flights</a>
+          <a class="nav-link" href="./inventory.html">Inventory</a>
+          <a class="nav-link" href="./orders.html">Orders</a>
+        </nav>
+      </header>
+
+      <section class="grid cards">
+        <article class="panel stat">
+          <h3>API 健康状态</h3>
+          <p id="api-status" class="big">检测中...</p>
+        </article>
+        <article class="panel stat">
+          <h3>机票样本数量</h3>
+          <p id="inv-count" class="big">-</p>
+        </article>
+        <article class="panel stat">
+          <h3>乘客订单数</h3>
+          <p id="order-count" class="big">-</p>
+          <label>乘客ID <input id="passenger-id" type="number" value="1" min="1" /></label>
+          <button id="btn-orders" type="button">刷新该乘客订单数</button>
+        </article>
+      </section>
+
+      <section class="panel">
+        <h2>快捷入口</h2>
+        <div class="quick-actions">
+          <a class="action-link" href="./flights.html">第一步：选起终城市</a>
+          <a class="action-link" href="./ticket-select.html">第二步：按条件筛选并下单</a>
+          <a class="action-link" href="./inventory.html">去管理库存</a>
+          <a class="action-link" href="./orders.html">去查看和取消订单</a>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>系统日志</h2>
+        <pre id="log" class="log-box">等待操作...</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./js/dashboard.js"></script>
+  </body>
+</html>

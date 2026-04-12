@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>票务系统 - 选票子页面</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-shape"></div>
+    <main class="page">
+      <header class="hero">
+        <h1>Ticket Select - 第二步筛选与选票</h1>
+        <p>基于起终城市，按日期/时间/机场/航司筛选可订机票</p>
+        <nav class="top-nav">
+          <a class="nav-link" href="./index.html">Dashboard</a>
+          <a class="nav-link active" href="./flights.html">Flights</a>
+          <a class="nav-link" href="./inventory.html">Inventory</a>
+          <a class="nav-link" href="./orders.html">Orders</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <h2>筛选条件</h2>
+        <div id="date-tabs" class="date-tabs"></div>
+        <form id="filter-form" class="inline-fields">
+          <label>出发城市 <input id="dep" list="dep-city-list" required autocomplete="off" /></label>
+          <datalist id="dep-city-list"></datalist>
+          <label>到达城市 <input id="arr" list="arr-city-list" required autocomplete="off" /></label>
+          <datalist id="arr-city-list"></datalist>
+          <label>日期 <input id="date" type="date" required /></label>
+          <label>出发时间下限(可选) <input id="dep-time" type="time" /></label>
+          <label>到达时间上限(可选) <input id="arr-time" type="time" /></label>
+          <label>航司(可选) <input id="airline" placeholder="如 CA 或 Air China" /></label>
+          <label>出发机场IATA(可选) <input id="src-iata" placeholder="如 PEK" /></label>
+          <label>到达机场IATA(可选) <input id="dst-iata" placeholder="如 SHA" /></label>
+          <label>乘客ID <input id="passenger-id" type="number" min="1" value="1" required /></label>
+          <button type="submit">筛选机票</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>候选机票（按经济舱价格升序）</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ticket_id</th>
+                <th>flight</th>
+                <th>airline</th>
+                <th>route</th>
+                <th>time</th>
+                <th>economy(余/价)</th>
+                <th>business(余/价)</th>
+                <th>下单</th>
+              </tr>
+            </thead>
+            <tbody id="result-body">
+              <tr><td colspan="8" style="text-align:center;color:gray;">请先筛选</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>系统日志</h2>
+        <pre id="log" class="log-box">等待操作...</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./js/ticket-select.js"></script>
+  </body>
+</html>

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>票务系统 - Orders</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-shape"></div>
+    <main class="page">
+      <header class="hero">
+        <h1>Orders - 订单管理</h1>
+        <p>调用 /api/v1/orders/{passenger_id} 与取消接口</p>
+        <nav class="top-nav">
+          <a class="nav-link" href="./index.html">Dashboard</a>
+          <a class="nav-link" href="./flights.html">Flights</a>
+          <a class="nav-link" href="./inventory.html">Inventory</a>
+          <a class="nav-link active" href="./orders.html">Orders</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <h2>查询订单</h2>
+        <form id="orders-form" class="inline-fields">
+          <label>passenger_id <input id="passenger-id" type="number" min="1" value="1" required /></label>
+          <button type="submit">加载订单</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>订单列表</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>order_id</th>
+                <th>状态</th>
+                <th>舱位</th>
+                <th>价格</th>
+                <th>航班</th>
+                <th>航线</th>
+                <th>日期</th>
+                <th>下单时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="orders-body">
+              <tr><td colspan="9" style="text-align:center;color:gray;">暂无数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>系统日志</h2>
+        <pre id="log" class="log-box">等待操作...</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./js/orders.js"></script>
+  </body>
+</html>

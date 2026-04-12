@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+db_project1.txt
+.pytest_cache/
+临时.txt
+报告.docx

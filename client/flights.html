@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>票务系统 - Flights Step 1</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-shape"></div>
+    <main class="page">
+      <header class="hero">
+        <h1>Flights - 选起点与终点</h1>
+        <p>第一步：先确定出发地和目的地，再进入子页面选具体机票</p>
+        <nav class="top-nav">
+          <a class="nav-link" href="./index.html">Dashboard</a>
+          <a class="nav-link active" href="./flights.html">Flights</a>
+          <a class="nav-link" href="./inventory.html">Inventory</a>
+          <a class="nav-link" href="./orders.html">Orders</a>
+        </nav>
+      </header>
+
+      <section class="panel">
+        <h2>第一步：选择路线</h2>
+        <form id="search-form" class="inline-fields">
+          <label>出发城市 <input id="dep" list="dep-city-list" required placeholder="Beijing" autocomplete="off" /></label>
+          <datalist id="dep-city-list"></datalist>
+          <label>到达城市 <input id="arr" list="arr-city-list" required placeholder="Shanghai" autocomplete="off" /></label>
+          <datalist id="arr-city-list"></datalist>
+          <button type="submit">下一步：去选票</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>流程说明</h2>
+        <p>第二步页面会提供这些筛选项：</p>
+        <ul>
+          <li>日期（必填）</li>
+          <li>出发时间下限、到达时间上限（可选）</li>
+          <li>航司（可选）</li>
+          <li>出发机场 IATA、到达机场 IATA（可选）</li>
+        </ul>
+        <p>筛选后你会看到属于某个 flight 的候选机票，再进行下单。</p>
+      </section>
+
+      <section class="panel">
+        <h2>系统日志</h2>
+        <pre id="log" class="log-box">等待操作...</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./js/flights.js"></script>
+  </body>
+</html>
