@@ -1,4 +1,14 @@
-import { apiRequest } from "./api.js";
+import { apiRequest, logout, requireLogin } from "./api.js";
+
+const currentPassengerId = requireLogin();
+const currentPassengerNode = document.getElementById("current-passenger");
+if (currentPassengerNode) {
+  currentPassengerNode.textContent = String(currentPassengerId);
+}
+const logoutBtn = document.getElementById("btn-logout");
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", logout);
+}
 
 const form = document.getElementById("search-form");
 

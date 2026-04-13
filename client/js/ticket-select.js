@@ -1,8 +1,13 @@
-import { apiRequest, setLog } from "./api.js";
+import { apiRequest, logout, requireLogin, setLog } from "./api.js";
 
 const form = document.getElementById("filter-form");
 const tbody = document.getElementById("result-body");
 const dateTabs = document.getElementById("date-tabs");
+const currentPassengerNode = document.getElementById("current-passenger");
+const currentPassengerId = requireLogin();
+
+currentPassengerNode.textContent = String(currentPassengerId);
+document.getElementById("btn-logout").addEventListener("click", logout);
 
 function escapeHtml(text) {
   return String(text)
@@ -70,17 +75,17 @@ function buildDateTabs() {
 }
 
 async function bookTicket(ticketId, cabinClass) {
-  const passengerId = Number(document.getElementById("passenger-id").value || 1);
   try {
     const data = await apiRequest("/api/v1/orders/book", {
       method: "POST",
       body: {
-        passenger_id: passengerId,
+        passenger_id: currentPassengerId,
         ticket_id: ticketId,
         cabin_class: cabinClass,
       },
     });
     setLog(`下单成功: order_id=${data.order_id}, ticket_id=${ticketId}, cabin=${cabinClass}`);
+    await searchAndRenderTickets();
   } catch (err) {
     setLog(`下单失败: ${err.message}`);
   }
@@ -123,8 +128,7 @@ function renderRows(rows) {
   });
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+async function searchAndRenderTickets() {
   const dep = document.getElementById("dep").value.trim();
   const arr = document.getElementById("arr").value.trim();
   const date = document.getElementById("date").value;
@@ -155,6 +159,11 @@ form.addEventListener("submit", async (event) => {
   } catch (err) {
     setLog(`筛选失败: ${err.message}`);
   }
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await searchAndRenderTickets();
 });
 
 fillRouteFromQuery();

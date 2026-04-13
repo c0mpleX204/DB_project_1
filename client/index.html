@@ -12,6 +12,7 @@
       <header class="hero">
         <h1>机票票务与管理系统</h1>
         <p>多页面前端（Dashboard / Flights / Inventory / Orders）</p>
+        <p>当前登录用户: <strong id="current-passenger">-</strong> <button id="btn-logout" type="button">退出登录</button></p>
         <nav class="top-nav">
           <a class="nav-link active" href="./index.html">Dashboard</a>
           <a class="nav-link" href="./flights.html">Flights</a>
@@ -32,8 +33,7 @@
         <article class="panel stat">
           <h3>乘客订单数</h3>
           <p id="order-count" class="big">-</p>
-          <label>乘客ID <input id="passenger-id" type="number" value="1" min="1" /></label>
-          <button id="btn-orders" type="button">刷新该乘客订单数</button>
+          <p>自动展示当前登录用户订单数</p>
         </article>
       </section>
 

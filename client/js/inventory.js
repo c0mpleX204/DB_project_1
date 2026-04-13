@@ -1,6 +1,15 @@
-import { apiRequest, setLog } from "./api.js";
+import { apiRequest, logout, requireLogin, setLog } from "./api.js";
 
 const tbody = document.getElementById("inv-body");
+const currentPassengerId = requireLogin();
+const currentPassengerNode = document.getElementById("current-passenger");
+if (currentPassengerNode) {
+  currentPassengerNode.textContent = String(currentPassengerId);
+}
+const logoutBtn = document.getElementById("btn-logout");
+if (logoutBtn) {
+  logoutBtn.addEventListener("click", logout);
+}
 
 function escapeHtml(text) {
   return String(text)

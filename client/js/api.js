@@ -1,4 +1,5 @@
 const BASE_URL = "http://127.0.0.1:8000";
+const AUTH_KEY = "current_passenger_id";
 
 function setLog(message) {
   const node = document.getElementById("log");
@@ -7,10 +8,50 @@ function setLog(message) {
   node.textContent = `[${now}] ${message}`;
 }
 
+function getCurrentPassengerId() {
+  const raw = localStorage.getItem(AUTH_KEY);
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function setCurrentPassengerId(passengerId) {
+  localStorage.setItem(AUTH_KEY, String(passengerId));
+}
+
+function clearCurrentPassengerId() {
+  localStorage.removeItem(AUTH_KEY);
+}
+
+function requireLogin() {
+  const passengerId = getCurrentPassengerId();
+  if (!passengerId) {
+    window.location.href = "./login.html";
+    throw new Error("login required");
+  }
+  return passengerId;
+}
+
+function logout() {
+  clearCurrentPassengerId();
+  window.location.href = "./login.html";
+}
+
 async function apiRequest(path, options = {}) {
   const url = `${BASE_URL}${path}`;
+  const passengerId = getCurrentPassengerId();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (passengerId) {
+    headers["X-Passenger-Id"] = String(passengerId);
+  }
+
   const finalOptions = {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   };
   if (finalOptions.body && typeof finalOptions.body !== "string") {
@@ -30,6 +71,10 @@ async function apiRequest(path, options = {}) {
   }
 
   if (!resp.ok) {
+    if (resp.status === 401 && path !== "/api/v1/auth/login" && !window.location.pathname.endsWith("/login.html")) {
+      clearCurrentPassengerId();
+      window.location.href = "./login.html";
+    }
     const detail = data && data.detail ? data.detail : `HTTP ${resp.status}`;
     throw new Error(detail);
   }
@@ -37,4 +82,13 @@ async function apiRequest(path, options = {}) {
   return data;
 }
 
-export { BASE_URL, apiRequest, setLog };
+export {
+  BASE_URL,
+  apiRequest,
+  clearCurrentPassengerId,
+  getCurrentPassengerId,
+  logout,
+  requireLogin,
+  setCurrentPassengerId,
+  setLog,
+};

@@ -12,6 +12,7 @@
       <header class="hero">
         <h1>Ticket Select - 第二步筛选与选票</h1>
         <p>基于起终城市，按日期/时间/机场/航司筛选可订机票</p>
+        <p>当前登录用户: <strong id="current-passenger">-</strong> <button id="btn-logout" type="button">退出登录</button></p>
         <nav class="top-nav">
           <a class="nav-link" href="./index.html">Dashboard</a>
           <a class="nav-link active" href="./flights.html">Flights</a>
@@ -34,7 +35,6 @@
           <label>航司(可选) <input id="airline" placeholder="如 CA 或 Air China" /></label>
           <label>出发机场IATA(可选) <input id="src-iata" placeholder="如 PEK" /></label>
           <label>到达机场IATA(可选) <input id="dst-iata" placeholder="如 SHA" /></label>
-          <label>乘客ID <input id="passenger-id" type="number" min="1" value="1" required /></label>
           <button type="submit">筛选机票</button>
         </form>
       </section>

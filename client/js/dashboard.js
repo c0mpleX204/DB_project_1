@@ -1,9 +1,13 @@
-import { BASE_URL, apiRequest, setLog } from "./api.js";
+import { BASE_URL, apiRequest, logout, requireLogin, setLog } from "./api.js";
 
 const apiStatusNode = document.getElementById("api-status");
 const invCountNode = document.getElementById("inv-count");
 const orderCountNode = document.getElementById("order-count");
-const passengerIdNode = document.getElementById("passenger-id");
+const currentPassengerNode = document.getElementById("current-passenger");
+const passengerId = requireLogin();
+
+currentPassengerNode.textContent = String(passengerId);
+document.getElementById("btn-logout").addEventListener("click", logout);
 
 async function loadDashboard() {
   try {
@@ -25,7 +29,6 @@ async function loadDashboard() {
 }
 
 async function loadOrderCount() {
-  const passengerId = Number(passengerIdNode.value || 1);
   try {
     const rows = await apiRequest(`/api/v1/orders/${passengerId}?limit=200&offset=0`);
     orderCountNode.textContent = String(Array.isArray(rows) ? rows.length : 0);
@@ -35,8 +38,6 @@ async function loadOrderCount() {
     setLog(`读取订单数失败: ${err.message}`);
   }
 }
-
-document.getElementById("btn-orders").addEventListener("click", loadOrderCount);
 
 loadDashboard();
 loadOrderCount();

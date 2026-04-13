@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>票务系统 - 登录</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="bg-shape"></div>
+    <main class="page">
+      <header class="hero">
+        <h1>用户登录</h1>
+        <p>请先登录后再进入系统</p>
+      </header>
+
+      <section class="panel">
+        <h2>登录信息</h2>
+        <form id="login-form" class="inline-fields">
+          <label>手机号 <input id="username" required placeholder="mobile_number" /></label>
+          <label>密码 <input id="password" type="password" required /></label>
+          <button type="submit">登录</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>系统日志</h2>
+        <pre id="log" class="log-box">等待登录...</pre>
+      </section>
+    </main>
+
+    <script type="module" src="./js/login.js"></script>
+  </body>
+</html>

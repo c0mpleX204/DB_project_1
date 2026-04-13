@@ -1,8 +1,12 @@
-import { apiRequest, setLog } from "./api.js";
+import { apiRequest, logout, requireLogin, setLog } from "./api.js";
 
 const form = document.getElementById("orders-form");
 const tbody = document.getElementById("orders-body");
-const passengerNode = document.getElementById("passenger-id");
+const currentPassengerNode = document.getElementById("current-passenger");
+const passengerId = requireLogin();
+
+currentPassengerNode.textContent = String(passengerId);
+document.getElementById("btn-logout").addEventListener("click", logout);
 
 function escapeHtml(text) {
   return String(text)
@@ -14,7 +18,6 @@ function escapeHtml(text) {
 }
 
 async function loadOrders() {
-  const passengerId = Number(passengerNode.value || 1);
   try {
     const rows = await apiRequest(`/api/v1/orders/${passengerId}?limit=200&offset=0`);
 

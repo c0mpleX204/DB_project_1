@@ -12,6 +12,7 @@
       <header class="hero">
         <h1>Orders - 订单管理</h1>
         <p>调用 /api/v1/orders/{passenger_id} 与取消接口</p>
+        <p>当前登录用户: <strong id="current-passenger">-</strong> <button id="btn-logout" type="button">退出登录</button></p>
         <nav class="top-nav">
           <a class="nav-link" href="./index.html">Dashboard</a>
           <a class="nav-link" href="./flights.html">Flights</a>
@@ -23,8 +24,7 @@
       <section class="panel">
         <h2>查询订单</h2>
         <form id="orders-form" class="inline-fields">
-          <label>passenger_id <input id="passenger-id" type="number" min="1" value="1" required /></label>
-          <button type="submit">加载订单</button>
+          <button type="submit">刷新我的订单</button>
         </form>
       </section>
 
