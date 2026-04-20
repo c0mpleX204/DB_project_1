@@ -56,14 +56,23 @@ def api_request(base_url: str, path: str, method: str = "GET", payload=None, pas
     try:
         with request.urlopen(req) as resp:
             body = resp.read().decode("utf-8")
-            return json.loads(body) if body else None
+            if not body:
+                raise RuntimeError("Empty response from server")
+            parsed =json.loads(body)
+            if not isinstance(parsed,dict):
+                raise RuntimeError("Invalid response format from server")
+            
+            return parsed
     except error.HTTPError as exc:
         body = exc.read().decode("utf-8")
         detail = f"HTTP {exc.code}"
         if body:
             try:
                 parsed = json.loads(body)
-                detail = parsed.get("detail", detail)
+                if isinstance(parsed, dict):
+                    detail=str(parsed.get("detail", detail))
+                else:
+                    detail=body
             except Exception:
                 detail = body
         raise RuntimeError(detail) from exc
