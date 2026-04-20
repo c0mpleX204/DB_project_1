@@ -1,383 +1,340 @@
 #!/usr/bin/env python3
 import argparse
-import datetime as dt
-from decimal import Decimal
+import json
+from pathlib import Path
+from urllib import error, parse, request
 
-import psycopg2
+
+SESSION_FILE = Path(".cli_session.json")
 
 
-def get_conn(args):
-    return psycopg2.connect(
-        host=args.host,
-        port=args.port,
-        user=args.user,
-        password=args.password,
-        dbname=args.database,
+def print_ok(message: str):
+    print(f"[OK] {message}")
+
+
+def print_info(message: str):
+    print(f"[INFO] {message}")
+
+
+def print_warn(message: str):
+    print(f"[WARN] {message}")
+
+
+def print_error(message: str):
+    print(f"[ERROR] {message}")
+
+
+def print_table(headers: list[str], rows: list[list[object]]):
+    text_rows = [["" if c is None else str(c) for c in row] for row in rows]
+    widths = [len(h) for h in headers]
+    for row in text_rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+
+    sep = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
+    header_line = "| " + " | ".join(headers[i].ljust(widths[i]) for i in range(len(headers))) + " |"
+
+    print(sep)
+    print(header_line)
+    print(sep)
+    for row in text_rows:
+        print("| " + " | ".join(row[i].ljust(widths[i]) for i in range(len(headers))) + " |")
+    print(sep)
+
+
+def api_request(base_url: str, path: str, method: str = "GET", payload=None, passenger_id: int | None = None):
+    url = f"{base_url.rstrip('/')}{path}"
+    headers = {"Content-Type": "application/json"}
+    if passenger_id:
+        headers["X-Passenger-Id"] = str(passenger_id)
+
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+
+    req = request.Request(url=url, data=data, headers=headers, method=method)
+    try:
+        with request.urlopen(req) as resp:
+            body = resp.read().decode("utf-8")
+            return json.loads(body) if body else None
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        detail = f"HTTP {exc.code}"
+        if body:
+            try:
+                parsed = json.loads(body)
+                detail = parsed.get("detail", detail)
+            except Exception:
+                detail = body
+        raise RuntimeError(detail) from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"API unreachable: {exc.reason}") from exc
+
+
+def save_session(passenger_id: int):
+    SESSION_FILE.write_text(json.dumps({"passenger_id": passenger_id}, ensure_ascii=False), encoding="utf-8")
+
+
+def load_session_passenger_id() -> int | None:
+    if not SESSION_FILE.exists():
+        return None
+    try:
+        data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+        passenger_id = int(data.get("passenger_id", 0))
+        return passenger_id if passenger_id > 0 else None
+    except Exception:
+        return None
+
+
+def require_passenger_id(args) -> int:
+    if args.passenger_id:
+        return args.passenger_id
+    session_id = load_session_passenger_id()
+    if session_id:
+        return session_id
+    raise ValueError("passenger_id missing. Please login first or pass --passenger-id.")
+
+
+def cmd_login(args):
+    data = api_request(
+        args.base_url,
+        "/api/v1/auth/login",
+        method="POST",
+        payload={
+            "username": args.mobile_number,
+            "password": args.password,
+        },
     )
+    passenger_id = int(data["passenger_id"])
+    save_session(passenger_id)
+    print_ok(f"登录成功 passenger_id={passenger_id}")
 
 
-def parse_date(text: str) -> dt.date:
-    return dt.datetime.strptime(text, "%Y-%m-%d").date()
+def cmd_logout(_args):
+    if SESSION_FILE.exists():
+        SESSION_FILE.unlink()
+        print_ok("退出登录成功")
+        return
+    print_info("当前没有登录会话")
 
 
-def parse_time(text: str) -> dt.time:
-    return dt.datetime.strptime(text, "%H:%M").time()
+def cmd_generate(args):
+    data = api_request(
+        args.base_url,
+        "/api/v1/tickets/generate",
+        method="POST",
+        payload={
+            "start_date": args.start_date,
+            "end_date": args.end_date,
+        },
+    )
+    print_ok(f"自动生成机票完成，新增 {data['added']} 条")
 
 
-def generate_tickets(conn, start_date: dt.date, end_date: dt.date):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            WITH latest_ticket AS (
-                SELECT DISTINCT ON (ti.flight_id)
-                    ti.flight_id,
-                    ti.business_price,
-                    ti.economy_price
-                FROM ticket_inventory ti
-                ORDER BY ti.flight_id, ti.flight_date DESC
-            )
-            SELECT f.flight_id, f.business_capacity, f.economy_capacity,
-                   lt.business_price, lt.economy_price
-            FROM flight f
-            LEFT JOIN latest_ticket lt ON lt.flight_id = f.flight_id
-            """
-        )
-        flights = cur.fetchall()
+def cmd_search(args):
+    params = {
+        "departure_city": args.departure_city,
+        "arrival_city": args.arrival_city,
+        "flight_date": args.date,
+        "limit": 200,
+        "offset": 0,
+    }
+    if args.airline:
+        params["airline"] = args.airline
+    if args.departure_time:
+        params["departure_time"] = args.departure_time
+    if args.arrival_time:
+        params["arrival_time"] = args.arrival_time
 
-        added = 0
-        day_count = (end_date - start_date).days + 1
-        for flight_id, biz_cap, eco_cap, biz_price, eco_price in flights:
-            if biz_price is None:
-                biz_price = Decimal("1000")
-            if eco_price is None:
-                eco_price = Decimal("300")
-
-            for i in range(day_count):
-                d = start_date + dt.timedelta(days=i)
-                weekday_factor = Decimal("1.00") + Decimal((d.weekday() % 3) * 5) / Decimal("100")
-                b = (Decimal(biz_price) * weekday_factor).quantize(Decimal("0.01"))
-                e = (Decimal(eco_price) * weekday_factor).quantize(Decimal("0.01"))
-                cur.execute(
-                    """
-                    INSERT INTO ticket_inventory(
-                        flight_id, flight_date, business_price, business_remain, economy_price, economy_remain
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (flight_id, flight_date) DO NOTHING
-                    """,
-                    (flight_id, d, b, biz_cap, e, eco_cap),
-                )
-                added += cur.rowcount
-
-    conn.commit()
-    print(f"Finish Generate {added} rows tickets info.")
-
-
-def search_tickets(conn, departure_city, arrival_city, date_, airline=None, departure_time=None, arrival_time=None):
-    query = """
-        SELECT
-            ti.ticket_id,
-            f.flight_number,
-            al.airline_code,
-            al.airline_name,
-            src_city.city_name AS source_city,
-            src_air.iata_code AS source_iata,
-            f.departure_time_local,
-            dst_city.city_name AS destination_city,
-            dst_air.iata_code AS destination_iata,
-            f.arrival_time_local,
-            f.arrival_day_offset,
-            ti.flight_date,
-            ti.business_price,
-            ti.business_remain,
-            ti.economy_price,
-            ti.economy_remain
-        FROM ticket_inventory ti
-        JOIN flight f ON f.flight_id = ti.flight_id
-        JOIN airline al ON al.airline_id = f.airline_id
-        JOIN airport src_air ON src_air.airport_id = f.source_airport_id
-        JOIN city src_city ON src_city.city_id = src_air.city_id
-        JOIN airport dst_air ON dst_air.airport_id = f.destination_airport_id
-        JOIN city dst_city ON dst_city.city_id = dst_air.city_id
-        WHERE src_city.city_name = %s
-          AND dst_city.city_name = %s
-          AND ti.flight_date = %s
-    """
-    params = [departure_city, arrival_city, date_]
-
-    if airline:
-        query += " AND (al.airline_code = %s OR al.airline_name = %s)"
-        params.extend([airline, airline])
-    if departure_time:
-        query += " AND f.departure_time_local >= %s"
-        params.append(departure_time)
-    if arrival_time:
-        query += " AND f.arrival_time_local <= %s AND f.arrival_day_offset = 0"
-        params.append(arrival_time)
-
-    query += " ORDER BY ti.economy_price ASC, ti.ticket_id ASC"
-
-    with conn.cursor() as cur:
-        cur.execute(query, params)
-        rows = cur.fetchall()
-
+    q = parse.urlencode(params)
+    rows = api_request(args.base_url, f"/api/v1/tickets/search?{q}")
     if not rows:
-        print("No ticket found.")
+        print_info("没有符合条件的机票")
         return
 
+    headers = [
+        "ticket_id",
+        "flight",
+        "airline",
+        "route",
+        "dep_time",
+        "arr_time",
+        "date",
+        "eco(价/余)",
+        "biz(价/余)",
+    ]
+    table_rows: list[list[object]] = []
     for r in rows:
-        print(
-            f"ticket_id={r[0]} flight={r[1]} airline={r[2]}({r[3]}) "
-            f"{r[4]}({r[5]})->{r[7]}({r[8]}) dep={r[6]} arr={r[9]}(+{r[10]}) "
-            f"date={r[11]} eco={r[14]}/{r[15]} biz={r[12]}/{r[13]}"
+        table_rows.append(
+            [
+                r["ticket_id"],
+                r["flight_number"],
+                f"{r['airline_code']}({r['airline_name']})",
+                f"{r['source_city']}({r['source_iata']})->{r['destination_city']}({r['destination_iata']})",
+                r["departure_time_local"],
+                f"{r['arrival_time_local']}(+{r['arrival_day_offset']})",
+                r["flight_date"],
+                f"{r['economy_price']}/{r['economy_remain']}",
+                f"{r['business_price']}/{r['business_remain']}",
+            ]
         )
 
-
-def book_ticket(conn, passenger_id: int, ticket_id: int, cabin_class: str):
-    if cabin_class not in {"economy", "business"}:
-        raise ValueError("cabin_class must be economy or business")
-
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM passenger WHERE passenger_id = %s", (passenger_id,))
-            if not cur.fetchone():
-                raise ValueError(f"passenger_id {passenger_id} not found")
-
-            if cabin_class == "economy":
-                cur.execute(
-                    """
-                    UPDATE ticket_inventory
-                    SET economy_remain = economy_remain - 1
-                    WHERE ticket_id = %s AND economy_remain > 0
-                    RETURNING economy_price
-                    """,
-                    (ticket_id,),
-                )
-            else:
-                cur.execute(
-                    """
-                    UPDATE ticket_inventory
-                    SET business_remain = business_remain - 1
-                    WHERE ticket_id = %s AND business_remain > 0
-                    RETURNING business_price
-                    """,
-                    (ticket_id,),
-                )
-
-            row = cur.fetchone()
-            if not row:
-                raise ValueError("ticket not found or no seat available")
-            price = row[0]
-
-            cur.execute(
-                """
-                INSERT INTO ticket_order(passenger_id, ticket_id, cabin_class, unit_price)
-                VALUES (%s, %s, %s, %s)
-                RETURNING order_id, booked_at
-                """,
-                (passenger_id, ticket_id, cabin_class, price),
-            )
-            order_id, booked_at = cur.fetchone()
-
-    print(f"Booked successfully. order_id={order_id}, booked_at={booked_at}")
+    print_table(headers, table_rows)
+    print_ok(f"共查询到 {len(rows)} 条机票")
 
 
-def list_orders(conn, passenger_id: int):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                o.order_id,
-                o.status,
-                o.cabin_class,
-                o.unit_price,
-                o.booked_at,
-                ti.flight_date,
-                f.flight_number,
-                src_city.city_name,
-                dst_city.city_name
-            FROM ticket_order o
-            JOIN ticket_inventory ti ON ti.ticket_id = o.ticket_id
-            JOIN flight f ON f.flight_id = ti.flight_id
-            JOIN airport src_air ON src_air.airport_id = f.source_airport_id
-            JOIN city src_city ON src_city.city_id = src_air.city_id
-            JOIN airport dst_air ON dst_air.airport_id = f.destination_airport_id
-            JOIN city dst_city ON dst_city.city_id = dst_air.city_id
-            WHERE o.passenger_id = %s
-            ORDER BY o.order_id DESC
-            """,
-            (passenger_id,),
-        )
-        rows = cur.fetchall()
+def cmd_book(args):
+    passenger_id = require_passenger_id(args)
+    data = api_request(
+        args.base_url,
+        "/api/v1/orders/book",
+        method="POST",
+        passenger_id=passenger_id,
+        payload={
+            "passenger_id": passenger_id,
+            "ticket_id": args.ticket_id,
+            "cabin_class": args.cabin_class,
+        },
+    )
+    print_ok(f"下单成功 order_id={data['order_id']} booked_at={data['booked_at']}")
 
+
+def cmd_orders(args):
+    passenger_id = require_passenger_id(args)
+    rows = api_request(
+        args.base_url,
+        f"/api/v1/orders/{passenger_id}?limit=200&offset=0",
+        passenger_id=passenger_id,
+    )
     if not rows:
-        print("No orders found.")
+        print_info("当前用户暂无订单")
         return
 
+    headers = ["order_id", "status", "class", "price", "flight", "route", "date", "booked_at"]
+    table_rows: list[list[object]] = []
     for r in rows:
-        print(
-            f"order_id={r[0]} status={r[1]} class={r[2]} price={r[3]} booked_at={r[4]} "
-            f"flight={r[6]} {r[7]}->{r[8]} date={r[5]}"
+        table_rows.append(
+            [
+                r["order_id"],
+                r["status"],
+                r["cabin_class"],
+                r["unit_price"],
+                r["flight_number"],
+                f"{r['source_city']}->{r['destination_city']}",
+                r["flight_date"],
+                r["booked_at"],
+            ]
         )
+    print_table(headers, table_rows)
+    print_ok(f"共查询到 {len(rows)} 条订单")
 
 
-def cancel_order(conn, passenger_id: int, order_id: int):
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT o.status, o.cabin_class, o.ticket_id
-                FROM ticket_order o
-                WHERE o.order_id = %s AND o.passenger_id = %s
-                FOR UPDATE
-                """,
-                (order_id, passenger_id),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise ValueError("order not found")
-            status, cabin_class, ticket_id = row
-            if status == "cancelled":
-                raise ValueError("order already cancelled")
+def cmd_cancel(args):
+    passenger_id = require_passenger_id(args)
+    data = api_request(
+        args.base_url,
+        f"/api/v1/orders/{passenger_id}/{args.order_id}/cancel",
+        method="POST",
+        passenger_id=passenger_id,
+    )
+    print_ok(f"取消成功 order_id={data['order_id']} status={data['status']}")
 
-            cur.execute(
-                "UPDATE ticket_order SET status = 'cancelled' WHERE order_id = %s",
-                (order_id,),
-            )
-            if cabin_class == "economy":
-                cur.execute(
-                    "UPDATE ticket_inventory SET economy_remain = economy_remain + 1 WHERE ticket_id = %s",
-                    (ticket_id,),
+
+def run_interactive_menu(args):
+    print_info("=== CS307 DB Project CLI (Interactive) ===")
+    print_info(f"API: {args.base_url}")
+
+    while True:
+        current_id = load_session_passenger_id()
+        print("\n请选择操作:")
+        print("1) 登录")
+        print("2) 搜索机票")
+        print("3) 下单")
+        print("4) 查看我的订单")
+        print("5) 取消订单")
+        print("6) 退出登录")
+        print("0) 退出程序")
+        if current_id:
+            print_info(f"当前登录 passenger_id={current_id}")
+        else:
+            print_warn("当前未登录")
+
+        choice = input("输入编号: ").strip()
+
+        try:
+            if choice == "1":
+                mobile = input("手机号: ").strip()
+                password = input("密码: ").strip()
+                cmd_login(argparse.Namespace(base_url=args.base_url, mobile_number=mobile, password=password))
+            elif choice == "2":
+                departure_city = input("出发城市: ").strip()
+                arrival_city = input("到达城市: ").strip()
+                date = input("日期(YYYY-MM-DD): ").strip()
+                airline = input("航司(可选, 回车跳过): ").strip() or None
+                departure_time = input("出发时间下限(可选 HH:MM): ").strip() or None
+                arrival_time = input("到达时间上限(可选 HH:MM): ").strip() or None
+                cmd_search(
+                    argparse.Namespace(
+                        base_url=args.base_url,
+                        departure_city=departure_city,
+                        arrival_city=arrival_city,
+                        date=date,
+                        airline=airline,
+                        departure_time=departure_time,
+                        arrival_time=arrival_time,
+                    )
                 )
+            elif choice == "3":
+                ticket_id = int(input("ticket_id: ").strip())
+                cabin_class = input("舱位(economy/business): ").strip()
+                cmd_book(
+                    argparse.Namespace(
+                        base_url=args.base_url,
+                        passenger_id=None,
+                        ticket_id=ticket_id,
+                        cabin_class=cabin_class,
+                    )
+                )
+            elif choice == "4":
+                cmd_orders(argparse.Namespace(base_url=args.base_url, passenger_id=None))
+            elif choice == "5":
+                order_id = int(input("order_id: ").strip())
+                cmd_cancel(
+                    argparse.Namespace(
+                        base_url=args.base_url,
+                        passenger_id=None,
+                        order_id=order_id,
+                    )
+                )
+            elif choice == "6":
+                cmd_logout(argparse.Namespace())
+            elif choice == "0":
+                print_info("已退出程序")
+                break
             else:
-                cur.execute(
-                    "UPDATE ticket_inventory SET business_remain = business_remain + 1 WHERE ticket_id = %s",
-                    (ticket_id,),
-                )
-
-    print(f"Cancelled order {order_id}.")
+                print_warn("无效选项，请重新输入")
+        except Exception as exc:
+            print_error(str(exc))
 
 
-def list_cities_by_region(conn, region_code: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT DISTINCT c.city_name
-            FROM city c
-            WHERE UPPER(c.region_code) = UPPER(%s)
-            ORDER BY c.city_name
-            """,
-            (region_code,),
-        )
-        rows = cur.fetchall()
-    for (name,) in rows:
-        print(name)
+def build_parser():
+    parser = argparse.ArgumentParser(description="CS307 DB Project CLI (API mode)")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
 
+    sub = parser.add_subparsers(dest="cmd", required=False)
 
-def list_airports_by_city(conn, city_name: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT a.airport_name, a.iata_code
-            FROM airport a
-            JOIN city c ON c.city_id = a.city_id
-            WHERE c.city_name = %s
-            ORDER BY a.airport_name
-            """,
-            (city_name,),
-        )
-        rows = cur.fetchall()
-    for airport, iata in rows:
-        print(f"{airport} ({iata})")
+    p = sub.add_parser("login", help="Login with mobile_number and password")
+    p.add_argument("--mobile-number", required=True)
+    p.add_argument("--password", required=True)
+    p.set_defaults(func=cmd_login)
 
-
-def list_airlines_by_region(conn, region_code: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT airline_code, airline_name
-            FROM airline
-            WHERE UPPER(region_code) = UPPER(%s)
-            ORDER BY airline_code
-            """,
-            (region_code,),
-        )
-        rows = cur.fetchall()
-    for code, name in rows:
-        print(f"{code} - {name}")
-
-
-def list_flights_between_iata(conn, source_code: str, destination_code: str):
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                f.flight_number,
-                src_city.city_name,
-                src_region.region_name,
-                dst_city.city_name,
-                dst_region.region_name
-            FROM flight f
-            JOIN airport src_air ON src_air.airport_id = f.source_airport_id
-            JOIN city src_city ON src_city.city_id = src_air.city_id
-            JOIN region src_region ON src_region.region_code = src_city.region_code
-            JOIN airport dst_air ON dst_air.airport_id = f.destination_airport_id
-            JOIN city dst_city ON dst_city.city_id = dst_air.city_id
-            JOIN region dst_region ON dst_region.region_code = dst_city.region_code
-            WHERE src_air.iata_code = %s AND dst_air.iata_code = %s
-            ORDER BY f.flight_number
-            """,
-            (source_code.upper(), destination_code.upper()),
-        )
-        rows = cur.fetchall()
-
-    for r in rows:
-        print(f"{r[0]} | {r[1]} ({r[2]}) -> {r[3]} ({r[4]})")
-
-
-def list_tickets_by_date_city(conn, date_, departure_city: str, arrival_city: str):
-    search_tickets(
-        conn,
-        departure_city=departure_city,
-        arrival_city=arrival_city,
-        date_=date_,
-        airline=None,
-        departure_time=None,
-        arrival_time=None,
-    )
-
-
-def list_tickets_by_time_window(
-    conn,
-    date_,
-    departure_city: str,
-    arrival_city: str,
-    departure_time_after,
-    arrival_time_before,
-):
-    search_tickets(
-        conn,
-        departure_city=departure_city,
-        arrival_city=arrival_city,
-        date_=date_,
-        airline=None,
-        departure_time=departure_time_after,
-        arrival_time=arrival_time_before,
-    )
-
-
-def main():
-    parser = argparse.ArgumentParser(description="CS307 DB Project CLI")
-    parser.add_argument("--host", default="localhost")
-    parser.add_argument("--port", type=int, default=5432)
-    parser.add_argument("--user", default="postgres")
-    parser.add_argument("--password", default="postgres")
-    parser.add_argument("--database", default="db_project_1")
-
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("logout", help="Clear local login session")
+    p.set_defaults(func=cmd_logout)
 
     p = sub.add_parser("generate", help="Generate ticket inventory for date range")
     p.add_argument("--start-date", required=True)
     p.add_argument("--end-date", required=True)
+    p.set_defaults(func=cmd_generate)
 
     p = sub.add_parser("search", help="Search tickets")
     p.add_argument("--departure-city", required=True)
@@ -386,92 +343,39 @@ def main():
     p.add_argument("--airline")
     p.add_argument("--departure-time")
     p.add_argument("--arrival-time")
+    p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("book", help="Book one ticket")
-    p.add_argument("--passenger-id", type=int, required=True)
+    p.add_argument("--passenger-id", type=int)
     p.add_argument("--ticket-id", type=int, required=True)
     p.add_argument("--cabin-class", choices=["economy", "business"], required=True)
+    p.set_defaults(func=cmd_book)
 
     p = sub.add_parser("orders", help="List passenger orders")
-    p.add_argument("--passenger-id", type=int, required=True)
+    p.add_argument("--passenger-id", type=int)
+    p.set_defaults(func=cmd_orders)
 
     p = sub.add_parser("cancel", help="Cancel one order")
-    p.add_argument("--passenger-id", type=int, required=True)
+    p.add_argument("--passenger-id", type=int)
     p.add_argument("--order-id", type=int, required=True)
+    p.set_defaults(func=cmd_cancel)
 
-    p = sub.add_parser("cities-by-region", help="Task 3.2 query #1")
-    p.add_argument("--region-code", required=True)
+    p = sub.add_parser("menu", help="Start interactive CLI menu")
+    p.set_defaults(func=run_interactive_menu)
 
-    p = sub.add_parser("airports-by-city", help="Task 3.2 query #2")
-    p.add_argument("--city", required=True)
+    return parser
 
-    p = sub.add_parser("airlines-by-region", help="Task 3.2 query #3")
-    p.add_argument("--region-code", required=True)
 
-    p = sub.add_parser("flights-by-iata", help="Task 3.2 query #4")
-    p.add_argument("--source", required=True)
-    p.add_argument("--destination", required=True)
-
-    p = sub.add_parser("tickets-by-date-city", help="Task 3.2 query #5")
-    p.add_argument("--date", required=True)
-    p.add_argument("--departure-city", required=True)
-    p.add_argument("--arrival-city", required=True)
-
-    p = sub.add_parser("tickets-by-time-window", help="Task 3.2 query #6")
-    p.add_argument("--date", required=True)
-    p.add_argument("--departure-city", required=True)
-    p.add_argument("--arrival-city", required=True)
-    p.add_argument("--departure-time-after", required=True)
-    p.add_argument("--arrival-time-before", required=True)
-
+def main():
+    parser = build_parser()
     args = parser.parse_args()
-
-    conn = get_conn(args)
     try:
-        if args.cmd == "generate":
-            generate_tickets(conn, parse_date(args.start_date), parse_date(args.end_date))
-        elif args.cmd == "search":
-            search_tickets(
-                conn,
-                args.departure_city,
-                args.arrival_city,
-                parse_date(args.date),
-                args.airline,
-                parse_time(args.departure_time) if args.departure_time else None,
-                parse_time(args.arrival_time) if args.arrival_time else None,
-            )
-        elif args.cmd == "book":
-            book_ticket(conn, args.passenger_id, args.ticket_id, args.cabin_class)
-        elif args.cmd == "orders":
-            list_orders(conn, args.passenger_id)
-        elif args.cmd == "cancel":
-            cancel_order(conn, args.passenger_id, args.order_id)
-        elif args.cmd == "cities-by-region":
-            list_cities_by_region(conn, args.region_code.upper())
-        elif args.cmd == "airports-by-city":
-            list_airports_by_city(conn, args.city)
-        elif args.cmd == "airlines-by-region":
-            list_airlines_by_region(conn, args.region_code.upper())
-        elif args.cmd == "flights-by-iata":
-            list_flights_between_iata(conn, args.source, args.destination)
-        elif args.cmd == "tickets-by-date-city":
-            list_tickets_by_date_city(
-                conn,
-                parse_date(args.date),
-                args.departure_city,
-                args.arrival_city,
-            )
-        elif args.cmd == "tickets-by-time-window":
-            list_tickets_by_time_window(
-                conn,
-                parse_date(args.date),
-                args.departure_city,
-                args.arrival_city,
-                parse_time(args.departure_time_after),
-                parse_time(args.arrival_time_before),
-            )
-    finally:
-        conn.close()
+        if not getattr(args, "cmd", None):
+            run_interactive_menu(args)
+            return
+        args.func(args)
+    except Exception as exc:
+        print_error(str(exc))
 
 
 if __name__ == "__main__":
