@@ -6,6 +6,7 @@ from urllib import error, parse, request
 
 
 SESSION_FILE = Path(".cli_session.json")
+ADMIN_PASSENGER_ID = -1
 
 
 def print_ok(message: str):
@@ -45,7 +46,7 @@ def print_table(headers: list[str], rows: list[list[object]]):
 def api_request(base_url: str, path: str, method: str = "GET", payload=None, passenger_id: int | None = None):
     url = f"{base_url.rstrip('/')}{path}"
     headers = {"Content-Type": "application/json"}
-    if passenger_id:
+    if passenger_id is not None:
         headers["X-Passenger-Id"] = str(passenger_id)
 
     data = None
@@ -53,8 +54,9 @@ def api_request(base_url: str, path: str, method: str = "GET", payload=None, pas
         data = json.dumps(payload).encode("utf-8")
 
     req = request.Request(url=url, data=data, headers=headers, method=method)
+    opener = request.build_opener(request.ProxyHandler({}))
     try:
-        with request.urlopen(req) as resp:
+        with opener.open(req) as resp:
             body = resp.read().decode("utf-8")
             if not body:
                 raise RuntimeError("Empty response from server")
@@ -66,9 +68,9 @@ def api_request(base_url: str, path: str, method: str = "GET", payload=None, pas
             try:
                 parsed = json.loads(body)
                 if isinstance(parsed, dict):
-                    detail=str(parsed.get("detail", detail))
+                    detail = str(parsed.get("detail", detail))
                 else:
-                    detail=body
+                    detail = body
             except Exception:
                 detail = body
         raise RuntimeError(detail) from exc
@@ -86,6 +88,8 @@ def load_session_passenger_id() -> int | None:
     try:
         data = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
         passenger_id = int(data.get("passenger_id", 0))
+        if passenger_id == ADMIN_PASSENGER_ID:
+            return ADMIN_PASSENGER_ID
         return passenger_id if passenger_id > 0 else None
     except Exception:
         return None
@@ -95,9 +99,18 @@ def require_passenger_id(args) -> int:
     if args.passenger_id:
         return args.passenger_id
     session_id = load_session_passenger_id()
+    if session_id == ADMIN_PASSENGER_ID:
+        raise ValueError("admin user cannot book tickets or view passenger orders.")
     if session_id:
         return session_id
     raise ValueError("passenger_id missing. Please login first or pass --passenger-id.")
+
+
+def require_admin_session() -> int:
+    session_id = load_session_passenger_id()
+    if session_id == ADMIN_PASSENGER_ID:
+        return ADMIN_PASSENGER_ID
+    raise ValueError("admin login required. Please login with the administrator account first.")
 
 
 def cmd_login(args):
@@ -112,6 +125,9 @@ def cmd_login(args):
     )
     passenger_id = int(data["passenger_id"])
     save_session(passenger_id)
+    if passenger_id == ADMIN_PASSENGER_ID:
+        print_ok("登录成功 admin user")
+        return
     print_ok(f"登录成功 passenger_id={passenger_id}")
 
 
@@ -124,19 +140,27 @@ def cmd_logout(_args):
 
 
 def cmd_generate(args):
+    admin_id = require_admin_session()
+    start_date = args.start_date or input("开始日期(YYYY-MM-DD): ").strip()
+    end_date = args.end_date or input("结束日期(YYYY-MM-DD): ").strip()
+    if not start_date or not end_date:
+        raise ValueError("start_date and end_date are required.")
+
     data = api_request(
         args.base_url,
         "/api/v1/tickets/generate",
         method="POST",
+        passenger_id=admin_id,
         payload={
-            "start_date": args.start_date,
-            "end_date": args.end_date,
+            "start_date": start_date,
+            "end_date": end_date,
         },
     )
     print_ok(f"自动生成机票完成，新增 {data['added']} 条")
 
 
 def cmd_search(args):
+    show_index = bool(getattr(args, "show_index", False))
     params = {
         "departure_city": args.departure_city,
         "arrival_city": args.arrival_city,
@@ -155,7 +179,7 @@ def cmd_search(args):
     rows = api_request(args.base_url, f"/api/v1/tickets/search?{q}")
     if not rows:
         print_info("没有符合条件的机票")
-        return
+        return []
 
     headers = [
         "ticket_id",
@@ -165,27 +189,31 @@ def cmd_search(args):
         "dep_time",
         "arr_time",
         "date",
-        "eco(价/余)",
-        "biz(价/余)",
+        "eco(price/remain)",
+        "biz(price/remain)",
     ]
+    if show_index:
+        headers = ["no"] + headers
     table_rows: list[list[object]] = []
-    for r in rows:
-        table_rows.append(
-            [
-                r["ticket_id"],
-                r["flight_number"],
-                f"{r['airline_code']}({r['airline_name']})",
-                f"{r['source_city']}({r['source_iata']})->{r['destination_city']}({r['destination_iata']})",
-                r["departure_time_local"],
-                f"{r['arrival_time_local']}(+{r['arrival_day_offset']})",
-                r["flight_date"],
-                f"{r['economy_price']}/{r['economy_remain']}",
-                f"{r['business_price']}/{r['business_remain']}",
-            ]
-        )
+    for idx, r in enumerate(rows, start=1):
+        one_row: list[object] = [
+            r["ticket_id"],
+            r["flight_number"],
+            f"{r['airline_code']}({r['airline_name']})",
+            f"{r['source_city']}({r['source_iata']})->{r['destination_city']}({r['destination_iata']})",
+            r["departure_time_local"],
+            f"{r['arrival_time_local']}(+{r['arrival_day_offset']})",
+            r["flight_date"],
+            f"{r['economy_price']}/{r['economy_remain']}",
+            f"{r['business_price']}/{r['business_remain']}",
+        ]
+        if show_index:
+            one_row = [idx, *one_row]
+        table_rows.append(one_row)
 
     print_table(headers, table_rows)
     print_ok(f"共查询到 {len(rows)} 条机票")
+    return rows
 
 
 def cmd_book(args):
@@ -204,17 +232,7 @@ def cmd_book(args):
     print_ok(f"下单成功 order_id={data['order_id']} booked_at={data['booked_at']}")
 
 
-def cmd_orders(args):
-    passenger_id = require_passenger_id(args)
-    rows = api_request(
-        args.base_url,
-        f"/api/v1/orders/{passenger_id}?limit=200&offset=0",
-        passenger_id=passenger_id,
-    )
-    if not rows:
-        print_info("当前用户暂无订单")
-        return
-
+def print_orders_table(rows: list[dict]):
     headers = ["order_id", "status", "class", "price", "flight", "route", "date", "booked_at"]
     table_rows: list[list[object]] = []
     for r in rows:
@@ -231,11 +249,37 @@ def cmd_orders(args):
             ]
         )
     print_table(headers, table_rows)
+
+
+def cmd_orders(args):
+    passenger_id = require_passenger_id(args)
+    rows = api_request(
+        args.base_url,
+        f"/api/v1/orders/{passenger_id}?limit=200&offset=0",
+        passenger_id=passenger_id,
+    )
+    if not rows:
+        print_info("当前用户暂无订单")
+        return
+
+    print_orders_table(rows)
     print_ok(f"共查询到 {len(rows)} 条订单")
 
 
 def cmd_cancel(args):
     passenger_id = require_passenger_id(args)
+    rows = api_request(
+        args.base_url,
+        f"/api/v1/orders/{passenger_id}?limit=200&offset=0",
+        passenger_id=passenger_id,
+    )
+    if rows:
+        print_info("取消前先展示当前订单:")
+        print_orders_table(rows)
+    else:
+        print_info("当前用户暂无订单")
+        return
+
     data = api_request(
         args.base_url,
         f"/api/v1/orders/{passenger_id}/{args.order_id}/cancel",
@@ -258,11 +302,14 @@ def run_interactive_menu(args):
         print("4) 查看我的订单")
         print("5) 取消订单")
         print("6) 退出登录")
-        print("0) 退出程序")
-        if current_id:
+        if current_id == ADMIN_PASSENGER_ID:
+            print("7) 管理员功能 (生成机票)")
+            print_info("当前登录 admin user")
+        elif current_id:
             print_info(f"当前登录 passenger_id={current_id}")
         else:
             print_warn("当前未登录")
+        print("0) 退出程序")
 
         choice = input("输入编号: ").strip()
 
@@ -278,7 +325,7 @@ def run_interactive_menu(args):
                 airline = input("航司(可选, 回车跳过): ").strip() or None
                 departure_time = input("出发时间下限(可选 HH:MM): ").strip() or None
                 arrival_time = input("到达时间上限(可选 HH:MM): ").strip() or None
-                cmd_search(
+                rows = cmd_search(
                     argparse.Namespace(
                         base_url=args.base_url,
                         departure_city=departure_city,
@@ -287,8 +334,29 @@ def run_interactive_menu(args):
                         airline=airline,
                         departure_time=departure_time,
                         arrival_time=arrival_time,
+                        show_index=True,
                     )
                 )
+                if rows and current_id != ADMIN_PASSENGER_ID:
+                    quick_book = input("是否直接下单? (y/N): ").strip().lower()
+                    if quick_book in {"y", "yes"}:
+                        selected = input(f"输入序号(1-{len(rows)}), 回车取消: ").strip()
+                        if selected:
+                            selected_idx = int(selected)
+                            if selected_idx < 1 or selected_idx > len(rows):
+                                raise ValueError("序号超出范围")
+                            cabin_class = input("舱位(economy/business, 默认economy): ").strip().lower() or "economy"
+                            if cabin_class not in {"economy", "business"}:
+                                raise ValueError("舱位必须是 economy 或 business")
+                            selected_row = rows[selected_idx - 1]
+                            cmd_book(
+                                argparse.Namespace(
+                                    base_url=args.base_url,
+                                    passenger_id=None,
+                                    ticket_id=int(selected_row["ticket_id"]),
+                                    cabin_class=cabin_class,
+                                )
+                            )
             elif choice == "3":
                 ticket_id = int(input("ticket_id: ").strip())
                 cabin_class = input("舱位(economy/business): ").strip()
@@ -313,6 +381,8 @@ def run_interactive_menu(args):
                 )
             elif choice == "6":
                 cmd_logout(argparse.Namespace())
+            elif choice == "7":
+                cmd_generate(argparse.Namespace(base_url=args.base_url, start_date=None, end_date=None))
             elif choice == "0":
                 print_info("已退出程序")
                 break
@@ -337,8 +407,8 @@ def build_parser():
     p.set_defaults(func=cmd_logout)
 
     p = sub.add_parser("generate", help="Generate ticket inventory for date range")
-    p.add_argument("--start-date", required=True)
-    p.add_argument("--end-date", required=True)
+    p.add_argument("--start-date")
+    p.add_argument("--end-date")
     p.set_defaults(func=cmd_generate)
 
     p = sub.add_parser("search", help="Search tickets")

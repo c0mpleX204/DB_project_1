@@ -1,5 +1,4 @@
 import datetime as dt
-from decimal import Decimal
 
 from app.repository.base import BaseRepository
 
@@ -174,7 +173,7 @@ class TicketRepository(BaseRepository):
 		return [self._map_search_row(r) for r in rows]
 
 	def generate_inventory(self, start_date: dt.date, end_date: dt.date) -> int:
-		rows = self.fetch_all(
+		row = self.fetch_one(
 			"""
 			WITH latest_ticket AS (
 				SELECT DISTINCT ON (ti.flight_id)
@@ -183,43 +182,47 @@ class TicketRepository(BaseRepository):
 					ti.economy_price
 				FROM ticket_inventory ti
 				ORDER BY ti.flight_id, ti.flight_date DESC
+			),
+			date_series AS (
+				SELECT generate_series(%s::date, %s::date, interval '1 day')::date AS flight_date
+			),
+			inserted AS (
+				INSERT INTO ticket_inventory(
+					flight_id,
+					flight_date,
+					business_price,
+					business_remain,
+					economy_price,
+					economy_remain
+				)
+				SELECT
+					f.flight_id,
+					ds.flight_date,
+					ROUND(
+						(COALESCE(lt.business_price, 1000::numeric) * (
+							1 + ((EXTRACT(DOW FROM ds.flight_date)::int %% 3) * 0.05)
+						))::numeric,
+						2
+					),
+					f.business_capacity,
+					ROUND(
+						(COALESCE(lt.economy_price, 300::numeric) * (
+							1 + ((EXTRACT(DOW FROM ds.flight_date)::int %% 3) * 0.05)
+						))::numeric,
+						2
+					),
+					f.economy_capacity
+				FROM flight f
+				CROSS JOIN date_series ds
+				LEFT JOIN latest_ticket lt ON lt.flight_id = f.flight_id
+				ON CONFLICT (flight_id, flight_date) DO NOTHING
+				RETURNING 1
 			)
-			SELECT f.flight_id, f.business_capacity, f.economy_capacity,
-				   lt.business_price, lt.economy_price
-			FROM flight f
-			LEFT JOIN latest_ticket lt ON lt.flight_id = f.flight_id
-			"""
+			SELECT COUNT(*) FROM inserted
+			""",
+			(start_date, end_date),
 		)
-
-		added = 0
-		day_count = (end_date - start_date).days + 1
-
-		with self.conn.cursor() as cur:
-			for flight_id, biz_cap, eco_cap, biz_price, eco_price in rows:
-				if biz_price is None:
-					biz_price = Decimal("1000")
-				if eco_price is None:
-					eco_price = Decimal("300")
-
-				for i in range(day_count):
-					d = start_date + dt.timedelta(days=i)
-					weekday_factor = Decimal("1.00") + Decimal((d.weekday() % 3) * 5) / Decimal("100")
-					b = (Decimal(biz_price) * weekday_factor).quantize(Decimal("0.01"))
-					e = (Decimal(eco_price) * weekday_factor).quantize(Decimal("0.01"))
-
-					cur.execute(
-						"""
-						INSERT INTO ticket_inventory(
-							flight_id, flight_date, business_price, business_remain,
-							economy_price, economy_remain
-						)
-						VALUES (%s, %s, %s, %s, %s, %s)
-						ON CONFLICT (flight_id, flight_date) DO NOTHING
-						""",
-						(flight_id, d, b, biz_cap, e, eco_cap),
-					)
-					added += cur.rowcount
-		return added
+		return int(row[0]) if row else 0
 
 	@staticmethod
 	def _map_inventory_row(row):

@@ -2,6 +2,7 @@ from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.api.v1.auth import require_admin
 from app.core.db import get_db
 from app.models.schemas import (
     TicketGenerateRequest,
@@ -75,6 +76,7 @@ def search_tickets(
 @router.post("/generate", response_model=TicketGenerateResult, summary="按日期范围自动生成机票")
 def generate_tickets(
     payload: TicketGenerateRequest,
+    _admin_id: int = Depends(require_admin),
     service: TicketService = Depends(get_ticket_service),
 ):
     return service.generate_inventory(payload)
